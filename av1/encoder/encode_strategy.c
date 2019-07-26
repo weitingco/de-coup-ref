@@ -567,7 +567,10 @@ static struct lookahead_entry *setup_arf_or_arf2(
 #else
       // surpass wronging
       (void) oxcf;
+      const GF_GROUP *const gf_group = &cpi->gf_group;
+      int which_arf = gf_group->arf_update_idx[gf_group->index];
       *temporal_filtered = 0;
+      cpi->is_arf_filter_off[which_arf] = 1;
 #endif
 #endif
     }

@@ -26,6 +26,7 @@ extern "C" {
 
 // My Own Config Setting
 #define MY_DISABLE_ALTREF 1
+#define MY_DUMP_ALTREF 1
 //
 
 // Max superblock size

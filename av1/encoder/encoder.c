@@ -100,6 +100,11 @@ FILE *yuv_rec_file;
 #define FILE_NAME_LEN 100
 #endif
 
+#if MY_DUMP_ALTREF
+FILE *yuv_rec_file;
+#define FILE_NAME_LEN 100
+#endif
+
 static INLINE void Scale2Ratio(AOM_SCALING mode, int *hr, int *hs) {
   switch (mode) {
     case NORMAL:
@@ -3299,7 +3304,8 @@ void aom_write_yuv_frame_420(YV12_BUFFER_CONFIG *s, FILE *f) {
 }
 #endif
 
-#ifdef OUTPUT_YUV_REC
+// #ifdef OUTPUT_YUV_REC
+#if MY_DUMP_ALTREF
 void aom_write_one_yuv_frame(AV1_COMMON *cm, YV12_BUFFER_CONFIG *s) {
   uint8_t *src = s->y_buffer;
   int h = cm->height;
@@ -5154,6 +5160,7 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
   if (cpi->oxcf.pass == 2 && cpi->sf.adaptive_interp_filter_search)
     cpi->sf.interp_filter_search_mask = setup_interp_filter_search_mask(cpi);
 
+
   if (encode_show_existing_frame(cm)) {
     restore_coding_context(cpi);
 
@@ -5379,6 +5386,30 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
 
 #ifdef OUTPUT_YUV_REC
   aom_write_one_yuv_frame(cm, &cm->cur_frame->buf);
+#endif
+
+#if MY_DUMP_ALTREF
+  // Dump the ALTREF used to encode this current frame
+  const int valid_update = cpi->oxcf.pass == 2;
+  /*
+  // print the encoding order and the frame's timestamp
+  if (valid_update) {
+    static int counter = 0;
+    fprintf(stdout, "%d %d\n", ++counter, cm->current_frame.order_hint);
+  }
+   */
+  RefCntBuffer *altref_rec_buf = get_ref_frame_buf(cm, ALTREF_FRAME);
+  RefCntBuffer *gold_rec_buf = get_ref_frame_buf(cm, GOLDEN_FRAME);
+
+  // at the very beginning, all the reference frame buffers point to
+  // the same one a.k.a GOLDEN_FRAME
+  if (altref_rec_buf && (valid_update && altref_rec_buf != gold_rec_buf)) {
+    YV12_BUFFER_CONFIG *altref_buf = &altref_rec_buf->buf;
+    // appending the altref frame used to encode this frame to the file
+    yuv_rec_file = fopen("rec_altref.yuv", "ab");
+    aom_write_one_yuv_frame(cm, altref_buf);
+    fclose(yuv_rec_file);
+  }
 #endif
 
   finalize_encoded_frame(cpi);
