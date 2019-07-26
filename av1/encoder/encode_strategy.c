@@ -557,12 +557,18 @@ static struct lookahead_entry *setup_arf_or_arf2(
       cpi->no_show_kf = 1;
     } else {
 #if !CONFIG_REALTIME_ONLY
+#if !MY_DISABLE_ALTREF
       if (oxcf->arnr_max_frames > 0) {
         // Produce the filtered ARF frame.
         av1_temporal_filter(cpi, arf_src_index);
         aom_extend_frame_borders(&cpi->alt_ref_buffer, av1_num_planes(cm));
         *temporal_filtered = 1;
       }
+#else
+      // surpass wronging
+      (void) oxcf;
+      *temporal_filtered = 0;
+#endif
 #endif
     }
     frame_params->show_frame = 0;

@@ -24,6 +24,10 @@ extern "C" {
 
 #undef MAX_SB_SIZE
 
+// My Own Config Setting
+#define MY_DISABLE_ALTREF 1
+//
+
 // Max superblock size
 #define MAX_SB_SIZE_LOG2 7
 #define MAX_SB_SIZE (1 << MAX_SB_SIZE_LOG2)
