@@ -5412,6 +5412,11 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
   }
 #endif
 
+#if MY_UPDATE_ALTREF
+  // We might be able to update ALTREF here as the entire encoding
+  // process is finished.
+#endif
+
   finalize_encoded_frame(cpi);
   // Build the bitstream
   int largest_tile_id = 0;  // Output from pack_bitstream
