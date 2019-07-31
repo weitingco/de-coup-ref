@@ -332,6 +332,16 @@ static void set_offsets_without_segment_id(const AV1_COMP *const cpi,
   set_mi_row_col(xd, tile, mi_row, mi_height, mi_col, mi_width, cm->mi_rows,
                  cm->mi_cols);
 
+#if MY_UPDATE_ALTREF
+  xd->f_buf_ctr = cm->f_buf_ctr;
+  xd->f_use_altref[0].buf0 = cm->f_use_altref.y_buffer;
+  xd->f_use_altref[0].stride = cm->width;
+  xd->f_use_altref[1].buf0 = cm->f_use_altref.u_buffer;
+  xd->f_use_altref[1].stride = cm->width;
+  xd->f_use_altref[2].buf0 = cm->f_use_altref.v_buffer;
+  xd->f_use_altref[2].stride = cm->width;
+#endif
+
   // Set up source buffers.
   av1_setup_src_planes(x, cpi->source, mi_row, mi_col, num_planes, bsize);
 
@@ -4970,6 +4980,17 @@ static void encode_frame_internal(AV1_COMP *cpi) {
   cm->current_frame.skip_mode_info.skip_mode_flag =
       check_skip_mode_enabled(cpi);
 
+#if MY_UPDATE_ALTREF
+  {
+    int frame_size = cm->f_use_altref.y_height * cm->f_use_altref.y_width;
+    // reset buffer for recoding
+    memset(cm->f_use_altref.y_buffer, 0, frame_size);
+    memset(cm->f_use_altref.u_buffer, 0, frame_size);
+    memset(cm->f_use_altref.v_buffer, 0, frame_size);
+    memset(cm->f_buf_ctr, 0, frame_size);
+  };
+#endif
+
   {
     cpi->row_mt_sync_read_ptr = av1_row_mt_sync_read_dummy;
     cpi->row_mt_sync_write_ptr = av1_row_mt_sync_write_dummy;
@@ -5282,6 +5303,43 @@ static void tx_partition_set_contexts(const AV1_COMMON *const cm,
       set_txfm_context(xd, max_tx_size, idy, idx);
 }
 
+#if MY_UPDATE_ALTREF
+static void copy_mb2buf(MACROBLOCKD *const xd,
+                        int mi_row, int mi_col, BLOCK_SIZE bsize) {
+  // top-left corrdinate
+  int th = mi_row * MI_SIZE;
+  int tw = mi_col * MI_SIZE;
+  int stride = xd->f_use_altref[0].stride;
+  int bh = block_size_high[bsize];
+  int bw = block_size_wide[bsize];
+
+  xd->f_use_altref[0].buf = &xd->f_use_altref[0].buf0[th * stride + tw];
+
+  for (int h = 0; h < bh; ++h) {
+    for (int w = 0; w < bw; ++w) {
+      int f_pos = h * stride + w;
+      xd->f_use_altref[0].buf[f_pos] =
+              xd->plane[0].dst.buf[h * xd->plane[0].dst.stride + w];
+    }
+  }
+  // write UV
+  for (int p = 1; p < MAX_MB_PLANE; ++p) {
+    int uv_th = th >> xd->plane[p].subsampling_y;
+    int uv_tw = tw >> xd->plane[p].subsampling_x;
+
+    xd->f_use_altref[p].buf  = &xd->f_use_altref[p].buf0[uv_th * stride + uv_tw];
+    for (int h = 0; h < (bh >> xd->plane[p].subsampling_y); ++h) {
+      for (int w = 0; w < (bw >> xd->plane[p].subsampling_x); ++w) {
+        int f_pos = h * stride + w;
+        int mb_stride = xd->plane[p].dst.stride;
+        xd->f_use_altref[p].buf[f_pos] =
+                xd->plane[p].dst.buf[h * mb_stride + w];
+      }
+    }
+  }
+}
+#endif
+
 static void encode_superblock(const AV1_COMP *const cpi, TileDataEnc *tile_data,
                               ThreadData *td, TOKENEXTRA **t, RUN_TYPE dry_run,
                               int mi_row, int mi_col, BLOCK_SIZE bsize,
@@ -5377,6 +5435,12 @@ static void encode_superblock(const AV1_COMP *const cpi, TileDataEnc *tile_data,
 #endif
 
     av1_encode_sb(cpi, x, bsize, mi_row, mi_col, dry_run);
+#if MY_UPDATE_ALTREF
+    int is_alt = is_inter_block(mbmi) &&
+            (mbmi->ref_frame[0] == ALTREF_FRAME || mbmi->ref_frame[1] == ALTREF_FRAME);
+    if (dry_run == OUTPUT_ENABLED && is_alt)
+      copy_mb2buf(xd, mi_row, mi_col, bsize);
+#endif
     av1_tokenize_sb_vartx(cpi, td, t, dry_run, mi_row, mi_col, bsize, rate,
                           tile_data->allow_update_cdf);
   }

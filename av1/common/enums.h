@@ -27,6 +27,7 @@ extern "C" {
 // My Own Config Setting
 #define MY_DISABLE_ALTREF 1
 #define MY_DUMP_ALTREF 1
+#define MY_DUMP_REFER2ALTREF 1
 #define MY_UPDATE_ALTREF 1
 //
 

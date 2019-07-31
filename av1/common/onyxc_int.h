@@ -559,6 +559,10 @@ typedef struct AV1Common {
 #endif
   const cfg_options_t *options;
   int is_decoding;
+#if MY_UPDATE_ALTREF
+  YV12_BUFFER_CONFIG f_use_altref;
+  int *f_buf_ctr;
+#endif
 } AV1_COMMON;
 
 // TODO(hkuang): Don't need to lock the whole pool after implementing atomic

@@ -1221,6 +1221,44 @@ static void init_config(struct AV1_COMP *cpi, AV1EncoderConfig *oxcf) {
   init_buffer_indices(cpi);
 }
 
+#if MY_UPDATE_ALTREF
+#define MY_BUF_TYPE uint8_t
+// Assuming YUV 4:2:0 format ...
+// Where can I get the subsampling size?
+static void alloc_filtered_buf(AV1_COMMON *const cm) {
+  const int h = cm->height;
+  const int w = cm->width;
+  cm->f_use_altref.y_stride = w;
+  cm->f_use_altref.uv_stride = w >> 1;
+  cm->f_use_altref.flags = 0;
+
+  cm->f_use_altref.y_height = h;
+  cm->f_use_altref.y_width = w;
+  cm->f_use_altref.uv_width = w >> 1;
+  cm->f_use_altref.uv_height = h >> 1;
+  cm->f_use_altref.uv_stride = w;
+
+  cm->f_use_altref.y_buffer = ((MY_BUF_TYPE *)malloc(sizeof(MY_BUF_TYPE) * w * h));
+  cm->f_use_altref.u_buffer = ((MY_BUF_TYPE *)malloc(sizeof(MY_BUF_TYPE) * w * h));
+  cm->f_use_altref.v_buffer = ((MY_BUF_TYPE *)malloc(sizeof(MY_BUF_TYPE) * w * h));
+
+  memset(cm->f_use_altref.y_buffer, 0, sizeof(MY_BUF_TYPE) * w * h);
+
+  cm->f_buf_ctr = (int *) malloc(sizeof(int) * w * h);
+  memset(cm->f_buf_ctr, 0, sizeof(int) * w * h);
+}
+
+static void free_filtered_buf(AV1_COMMON *const cm) {
+  if (cm->f_use_altref.y_buffer) {
+    free(cm->f_use_altref.y_buffer);
+    free(cm->f_use_altref.u_buffer);
+    free(cm->f_use_altref.v_buffer);
+  }
+  if (cm->f_buf_ctr)
+    free(cm->f_buf_ctr);
+}
+#endif
+
 static void set_rc_buffer_sizes(RATE_CONTROL *rc,
                                 const AV1EncoderConfig *oxcf) {
   const int64_t bandwidth = oxcf->target_bandwidth;
@@ -2654,6 +2692,9 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf,
   cpi->common.buffer_pool = pool;
 
   init_config(cpi, oxcf);
+#if MY_UPDATE_ALTREF
+  alloc_filtered_buf(cm);
+#endif
   av1_rc_init(&cpi->oxcf, oxcf->pass, &cpi->rc);
 
   cm->current_frame.frame_number = 0;
@@ -3201,6 +3242,10 @@ void av1_remove_compressor(AV1_COMP *cpi) {
   cpi->ssim_vars = NULL;
 #endif  // CONFIG_INTERNAL_STATS
 
+#if MY_UPDATE_ALTREF
+  free_filtered_buf(cm);
+#endif
+
   av1_remove_common(cm);
   for (i = 0; i < FRAME_BUFFERS; ++i) {
     av1_hash_table_destroy(&cm->buffer_pool->frame_bufs[i].hash_table);
@@ -3306,7 +3351,7 @@ void aom_write_yuv_frame_420(YV12_BUFFER_CONFIG *s, FILE *f) {
 
 // #ifdef OUTPUT_YUV_REC
 #if MY_DUMP_ALTREF
-void aom_write_one_yuv_frame(AV1_COMMON *cm, YV12_BUFFER_CONFIG *s) {
+void aom_write_one_yuv_frame(AV1_COMMON *cm, YV12_BUFFER_CONFIG *s, FILE *yuv_rec_file) {
   uint8_t *src = s->y_buffer;
   int h = cm->height;
   if (yuv_rec_file == NULL) return;
@@ -5407,11 +5452,18 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
     YV12_BUFFER_CONFIG *altref_buf = &altref_rec_buf->buf;
     // appending the altref frame used to encode this frame to the file
     yuv_rec_file = fopen("rec_altref.yuv", "ab");
-    aom_write_one_yuv_frame(cm, altref_buf);
+    aom_write_one_yuv_frame(cm, altref_buf, yuv_rec_file);
     fclose(yuv_rec_file);
   }
 #endif
 
+#if MY_DUMP_REFER2ALTREF
+  if (valid_update && !frame_is_intra_only(cm)) {
+    FILE *fid = fopen("rec_ref2alt.yuv", "ab");
+    aom_write_one_yuv_frame(cm, &cm->f_use_altref, fid);
+    fclose(fid);
+  }
+#endif
 #if MY_UPDATE_ALTREF
   // We might be able to update ALTREF here as the entire encoding
   // process is finished.
