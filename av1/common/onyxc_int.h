@@ -561,7 +561,11 @@ typedef struct AV1Common {
   int is_decoding;
 #if MY_UPDATE_ALTREF
   YV12_BUFFER_CONFIG f_use_altref;
+  YV12_BUFFER_CONFIG altref_obsv;
+  YV12_BUFFER_CONFIG altref_backup;
+
   int *f_buf_ctr;
+  unsigned int altref_idx;
 #endif
 } AV1_COMMON;
 
