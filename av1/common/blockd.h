@@ -585,6 +585,7 @@ typedef struct macroblockd {
   uint8_t *tmp_obmc_bufs[2];
 #if MY_UPDATE_ALTREF
   struct buf_2d f_use_altref[MAX_MB_PLANE];
+  struct buf_2d f_altref_obrv[MAX_MB_PLANE];
   int *f_buf_ctr;
 #endif
 } MACROBLOCKD;

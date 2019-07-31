@@ -5504,6 +5504,14 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
     fclose(fid);
   }
 #endif
+#if MY_DUMP_REFER2ALTREF_ALIGNED
+  if (valid_update && !frame_is_intra_only(cm)) {
+    FILE *fid = fopen("rec_ref2alt_aligned.yuv", "ab");
+    aom_write_one_yuv_frame(cm, &cm->altref_obsv, fid);
+    fclose(fid);
+  }
+#endif
+
 #if MY_UPDATE_ALTREF
   // We might be able to update ALTREF here as the entire encoding
   // process is finished.

@@ -28,6 +28,7 @@ extern "C" {
 #define MY_DISABLE_ALTREF 1
 #define MY_DUMP_ALTREF 1
 #define MY_DUMP_REFER2ALTREF 1
+#define MY_DUMP_REFER2ALTREF_ALIGNED 1
 #define MY_UPDATE_ALTREF 1
 //
 

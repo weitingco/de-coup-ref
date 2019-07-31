@@ -67,6 +67,16 @@
 #include "av1/encoder/tokenize.h"
 #include "av1/encoder/var_based_part.h"
 
+#if MY_UPDATE_ALTREF
+void static set_my_buf_zero(YV12_BUFFER_CONFIG *buf) {
+  int frame_size = buf->y_height * buf->y_width;
+  // reset buffer for recoding
+  memset(buf->y_buffer, 0, frame_size);
+  memset(buf->u_buffer, 0, frame_size);
+  memset(buf->v_buffer, 0, frame_size);
+}
+#endif
+
 static void encode_superblock(const AV1_COMP *const cpi, TileDataEnc *tile_data,
                               ThreadData *td, TOKENEXTRA **t, RUN_TYPE dry_run,
                               int mi_row, int mi_col, BLOCK_SIZE bsize,
@@ -295,6 +305,18 @@ static void setup_block_rdmult(const AV1_COMP *const cpi, MACROBLOCK *const x,
   }
 }
 
+#if MY_UPDATE_ALTREF
+static void set_xd_buf_pointers(struct buf_2d xd_buf[MAX_MB_PLANE],
+                                const YV12_BUFFER_CONFIG* buf) {
+  xd_buf[0].buf0 = buf->y_buffer;
+  xd_buf[0].stride = buf->y_stride;
+  xd_buf[1].buf0 = buf->u_buffer;
+  xd_buf[1].stride = buf->uv_stride;
+  xd_buf[2].buf0 = buf->v_buffer;
+  xd_buf[2].stride = buf->uv_stride;
+}
+#endif
+
 static void set_offsets_without_segment_id(const AV1_COMP *const cpi,
                                            const TileInfo *const tile,
                                            MACROBLOCK *const x, int mi_row,
@@ -334,12 +356,8 @@ static void set_offsets_without_segment_id(const AV1_COMP *const cpi,
 
 #if MY_UPDATE_ALTREF
   xd->f_buf_ctr = cm->f_buf_ctr;
-  xd->f_use_altref[0].buf0 = cm->f_use_altref.y_buffer;
-  xd->f_use_altref[0].stride = cm->width;
-  xd->f_use_altref[1].buf0 = cm->f_use_altref.u_buffer;
-  xd->f_use_altref[1].stride = cm->width;
-  xd->f_use_altref[2].buf0 = cm->f_use_altref.v_buffer;
-  xd->f_use_altref[2].stride = cm->width;
+  set_xd_buf_pointers(xd->f_use_altref, &cm->f_use_altref);
+  set_xd_buf_pointers(xd->f_altref_obrv, &cm->altref_obsv);
 #endif
 
   // Set up source buffers.
@@ -4984,9 +5002,8 @@ static void encode_frame_internal(AV1_COMP *cpi) {
   {
     int frame_size = cm->f_use_altref.y_height * cm->f_use_altref.y_width;
     // reset buffer for recoding
-    memset(cm->f_use_altref.y_buffer, 0, frame_size);
-    memset(cm->f_use_altref.u_buffer, 0, frame_size);
-    memset(cm->f_use_altref.v_buffer, 0, frame_size);
+    set_my_buf_zero(&cm->f_use_altref);
+    set_my_buf_zero(&cm->altref_obsv);
     memset(cm->f_buf_ctr, 0, frame_size);
   };
 #endif
@@ -5326,6 +5343,7 @@ static void copy_mb2buf(MACROBLOCKD *const xd,
   for (int p = 1; p < MAX_MB_PLANE; ++p) {
     int uv_th = th >> xd->plane[p].subsampling_y;
     int uv_tw = tw >> xd->plane[p].subsampling_x;
+    stride = xd->f_use_altref[p].stride;
 
     xd->f_use_altref[p].buf  = &xd->f_use_altref[p].buf0[uv_th * stride + uv_tw];
     for (int h = 0; h < (bh >> xd->plane[p].subsampling_y); ++h) {
@@ -5334,6 +5352,64 @@ static void copy_mb2buf(MACROBLOCKD *const xd,
         int mb_stride = xd->plane[p].dst.stride;
         xd->f_use_altref[p].buf[f_pos] =
                 xd->plane[p].dst.buf[h * mb_stride + w];
+      }
+    }
+  }
+}
+
+static void copy_mb_altref_recon(const AV1_COMMON *const cm, MACROBLOCKD *const xd,
+                                 int mi_row, int mi_col, BLOCK_SIZE bsize) {
+  MB_MODE_INFO *mbmi = xd->mi[0];
+  int altref = mbmi->ref_frame[0] == ALTREF_FRAME ? 0 :
+               mbmi->ref_frame[1] == ALTREF_FRAME ? 1 : -1;
+  // altref is not used as reference, so we skip copying this block
+  if (altref == -1) {
+    return;
+  }
+
+  const int bh = block_size_high[bsize];
+  const int bw = block_size_wide[bsize];
+
+  // How to handel mvs with odd number
+  int mv_r = (mbmi->mv[altref].as_mv.row >> 4) << 1;
+  int mv_c = (mbmi->mv[altref].as_mv.col >> 4) << 1;
+  // find the top-left coordinate of the reference block
+  int tr = mi_row * MI_SIZE + mv_r;
+  int tc = mi_col * MI_SIZE + mv_c;
+
+  // copy y
+  int mb_stride = xd->plane[0].dst.stride;
+  for (int h = 0; h < bh; ++h) {
+    // out of boundary
+    if (h + tr < 0) continue;
+    if (h + tr >= cm->height) break;
+
+    for (int w = 0; w < bw; ++w) {
+      if (w + tc < 0) continue;
+      if (w + tc >= cm->width) break;
+
+      int f_pos = (tr + h) * xd->f_altref_obrv[0].stride + (tc + w);
+      xd->f_altref_obrv[0].buf0[f_pos] = xd->plane[0].dst.buf[h * mb_stride + w];
+
+    }
+  }
+
+  // copy uv
+  for (int p = 1; p < MAX_MB_PLANE; ++p) {
+    int uv_tr = tr >> xd->plane[p].subsampling_y;
+    int uv_tc = tc >> xd->plane[p].subsampling_x;
+    mb_stride = xd->plane[p].dst.stride;
+
+    for (int h = 0; h < (bh >> xd->plane[p].subsampling_y); ++h) {
+      if (uv_tr + h < 0) continue;
+      if (uv_tr + h >= (cm->height >> xd->plane[p].subsampling_y)) break;
+
+      for (int w = 0; w < (bw >> xd->plane[p].subsampling_x); ++w) {
+        if (uv_tc + w < 0) continue;
+        if (uv_tc + w >= (cm->width >> xd->plane[p].subsampling_x)) break;
+
+        int f_pos = (uv_tr + h) * xd->f_altref_obrv[p].stride + (uv_tc + w);
+        xd->f_altref_obrv[p].buf0[f_pos] = xd->plane[p].dst.buf[h * mb_stride + w];
       }
     }
   }
@@ -5438,8 +5514,10 @@ static void encode_superblock(const AV1_COMP *const cpi, TileDataEnc *tile_data,
 #if MY_UPDATE_ALTREF
     int is_alt = is_inter_block(mbmi) &&
             (mbmi->ref_frame[0] == ALTREF_FRAME || mbmi->ref_frame[1] == ALTREF_FRAME);
-    if (dry_run == OUTPUT_ENABLED && is_alt)
+    if (dry_run == OUTPUT_ENABLED && is_alt) {
       copy_mb2buf(xd, mi_row, mi_col, bsize);
+      copy_mb_altref_recon(cm, xd, mi_row, mi_col, bsize);
+    }
 #endif
     av1_tokenize_sb_vartx(cpi, td, t, dry_run, mi_row, mi_col, bsize, rate,
                           tile_data->allow_update_cdf);
