@@ -5488,7 +5488,7 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
 
   // at the very beginning, all the reference frame buffers point to
   // the same one a.k.a GOLDEN_FRAME
-  if (altref_rec_buf && (valid_update && altref_rec_buf != gold_rec_buf)) {
+  if (valid_update && !frame_is_intra_only(cm) && altref_rec_buf != gold_rec_buf) {
     YV12_BUFFER_CONFIG *altref_buf = &altref_rec_buf->buf;
     // appending the altref frame used to encode this frame to the file
     yuv_rec_file = fopen("rec_altref.yuv", "ab");
@@ -5498,14 +5498,14 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
 #endif
 
 #if MY_DUMP_REFER2ALTREF
-  if (valid_update && !frame_is_intra_only(cm)) {
+  if (valid_update && !frame_is_intra_only(cm) && altref_rec_buf != gold_rec_buf) {
     FILE *fid = fopen("rec_ref2alt.yuv", "ab");
     aom_write_one_yuv_frame(cm, &cm->f_use_altref, fid);
     fclose(fid);
   }
 #endif
 #if MY_DUMP_REFER2ALTREF_ALIGNED
-  if (valid_update && !frame_is_intra_only(cm)) {
+  if (valid_update && !frame_is_intra_only(cm) && altref_rec_buf != gold_rec_buf) {
     FILE *fid = fopen("rec_ref2alt_aligned.yuv", "ab");
     aom_write_one_yuv_frame(cm, &cm->altref_obsv, fid);
     fclose(fid);
