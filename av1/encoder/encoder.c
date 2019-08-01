@@ -130,6 +130,49 @@ void copy_yu12_buf(YV12_BUFFER_CONFIG *src, YV12_BUFFER_CONFIG *dst) {
     }
   }
 }
+
+void recon_temp_filtering(AV1_COMMON *const cm,
+                          YV12_BUFFER_CONFIG *src, // ALTREF
+                          YV12_BUFFER_CONFIG *dst) {
+  const int w = cm->width;
+  const int h = cm->height;
+
+  int stride = cm->width;
+  int s_stride = src->y_stride;
+  int d_stride = dst->y_stride;
+
+  // copy y
+  for (int r = 0; r < h; ++r) {
+    for (int c = 0; c < w; ++c) {
+      int tmp = src->y_buffer[r * s_stride + c] + cm->f_buf[0][r * stride + c];
+      tmp = DIVIDE_AND_ROUND(tmp, (cm->f_buf_ctr[r * stride + c] + 1));
+      dst->y_buffer[r * d_stride + c] = tmp;
+    }
+  }
+
+  int subsampling = src->subsampling_x;
+  stride = cm->width >> subsampling;
+  s_stride = src->uv_stride;
+  d_stride = dst->uv_stride;
+
+  // copy u
+  for (int r = 0; r < (h >> subsampling); ++r) {
+    for (int c = 0; c < (w >> subsampling); ++c) {
+      int tmp = src->u_buffer[r * s_stride + c] + cm->f_buf[1][r * stride + c];
+      tmp = DIVIDE_AND_ROUND(tmp, (cm->f_buf_ctr_uv[r * stride + c] + 1));
+      dst->u_buffer[r * d_stride + c] = tmp;
+    }
+  }
+
+  // copy u
+  for (int r = 0; r < (h >> subsampling); ++r) {
+    for (int c = 0; c < (w >> subsampling); ++c) {
+      int tmp = src->v_buffer[r * s_stride + c] + cm->f_buf[2][r * stride + c];
+      tmp = DIVIDE_AND_ROUND(tmp, (cm->f_buf_ctr_uv[r * stride + c] + 1));
+      dst->v_buffer[r * d_stride + c] = tmp;
+    }
+  }
+}
 #endif
 
 static INLINE void Scale2Ratio(AOM_SCALING mode, int *hr, int *hs) {
@@ -1272,11 +1315,23 @@ static void alloc_filtered_buf(AV1_COMMON *const cm, YV12_BUFFER_CONFIG *buf) {
   memset(buf->y_buffer, 0, sizeof(MY_BUF_TYPE) * w * h);
 }
 
+static void alloc_int_buf(AV1_COMMON *const cm, int *buf[MAX_MB_PLANE]) {
+  const int h = cm->height;
+  const int w = cm->width;
+
+  for (int p = 0; p < MAX_MB_PLANE; ++p) {
+    buf[p] = (int *)malloc(sizeof(int) * w * h);
+    memset(buf[p], 0, sizeof(int) * w * h);
+  }
+}
+
 static void alloc_counter(AV1_COMMON *const cm) {
   const int h = cm->height;
   const int w = cm->width;
   cm->f_buf_ctr = (int *) malloc(sizeof(int) * w * h);
+  cm->f_buf_ctr_uv = (int *) malloc(sizeof(int) * w * h);
   memset(cm->f_buf_ctr, 0, sizeof(int) * w * h);
+  memset(cm->f_buf_ctr_uv, 0, sizeof(int) * w * h);
 }
 
 static void free_filtered_buf(YV12_BUFFER_CONFIG *buf) {
@@ -1287,9 +1342,17 @@ static void free_filtered_buf(YV12_BUFFER_CONFIG *buf) {
   }
 }
 
+static void free_int_buf(int *buf[MAX_MB_PLANE]) {
+  for (int p = 0; p < MAX_MB_PLANE; ++p) {
+    if (buf[p]) free(buf[p]);
+  }
+}
+
 static void free_counter(AV1_COMMON *const cm) {
-  if (cm->f_buf_ctr)
+  if (cm->f_buf_ctr) {
     free(cm->f_buf_ctr);
+    free(cm->f_buf_ctr_uv);
+  }
 }
 #endif
 
@@ -2730,6 +2793,8 @@ AV1_COMP *av1_create_compressor(AV1EncoderConfig *oxcf,
   alloc_filtered_buf(cm, &cm->f_use_altref);
   alloc_filtered_buf(cm, &cm->altref_obsv);
   alloc_filtered_buf(cm, &cm->altref_backup);
+
+  alloc_int_buf(cm, cm->f_buf);
   alloc_counter(cm);
 #endif
   av1_rc_init(&cpi->oxcf, oxcf->pass, &cpi->rc);
@@ -3283,6 +3348,7 @@ void av1_remove_compressor(AV1_COMP *cpi) {
   free_filtered_buf(&cm->f_use_altref);
   free_filtered_buf(&cm->altref_obsv);
   free_filtered_buf(&cm->altref_backup);
+  free_int_buf(cm->f_buf);
   free_counter(cm);
 #endif
 
@@ -5507,6 +5573,9 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
 #if MY_DUMP_REFER2ALTREF_ALIGNED
   if (valid_update && !frame_is_intra_only(cm) && altref_rec_buf != gold_rec_buf) {
     FILE *fid = fopen("rec_ref2alt_aligned.yuv", "ab");
+    // visualize temporal filtering
+    recon_temp_filtering(cm, &altref_rec_buf->buf, &cm->altref_obsv);
+
     aom_write_one_yuv_frame(cm, &cm->altref_obsv, fid);
     fclose(fid);
   }

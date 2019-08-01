@@ -560,11 +560,14 @@ typedef struct AV1Common {
   const cfg_options_t *options;
   int is_decoding;
 #if MY_UPDATE_ALTREF
+  // the first two are just to generate auxiliary output for us
   YV12_BUFFER_CONFIG f_use_altref;
   YV12_BUFFER_CONFIG altref_obsv;
   YV12_BUFFER_CONFIG altref_backup;
 
+  int *f_buf[MAX_MB_PLANE];
   int *f_buf_ctr;
+  int *f_buf_ctr_uv;
   unsigned int altref_idx;
 #endif
 } AV1_COMMON;

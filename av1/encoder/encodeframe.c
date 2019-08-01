@@ -71,9 +71,17 @@
 void static set_my_buf_zero(YV12_BUFFER_CONFIG *buf) {
   int frame_size = buf->y_height * buf->y_width;
   // reset buffer for recoding
-  memset(buf->y_buffer, 0, frame_size);
-  memset(buf->u_buffer, 0, frame_size);
-  memset(buf->v_buffer, 0, frame_size);
+  memset(buf->y_buffer, 0, frame_size * sizeof(uint8_t));
+  memset(buf->u_buffer, 0, frame_size * sizeof(uint8_t));
+  memset(buf->v_buffer, 0, frame_size * sizeof(uint8_t));
+}
+
+void static set_my_int_buf_zero(AV1_COMMON *const cm) {
+  for (int p = 0; p < MAX_MB_PLANE; ++p) {
+    memset(cm->f_buf[p], 0, cm->width * cm->height * sizeof(*(cm->f_buf[p])));
+  }
+  memset(cm->f_buf_ctr, 0, cm->width * cm->height * sizeof(*(cm->f_buf_ctr)));
+  memset(cm->f_buf_ctr_uv, 0, cm->width * cm->height * sizeof(*(cm->f_buf_ctr_uv)));
 }
 #endif
 
@@ -315,6 +323,15 @@ static void set_xd_buf_pointers(struct buf_2d xd_buf[MAX_MB_PLANE],
   xd_buf[2].buf0 = buf->v_buffer;
   xd_buf[2].stride = buf->uv_stride;
 }
+
+static void set_xd_buf_int_ptr(const AV1_COMMON *const cm,
+                               MACROBLOCKD *const xd) {
+  for (int p = 0; p < MAX_MB_PLANE; ++p) {
+    xd->f_buf[p] = cm->f_buf[p];
+  }
+  xd->f_buf_ctr = cm->f_buf_ctr;
+  xd->f_buf_ctr_uv = cm->f_buf_ctr_uv;
+}
 #endif
 
 static void set_offsets_without_segment_id(const AV1_COMP *const cpi,
@@ -355,7 +372,8 @@ static void set_offsets_without_segment_id(const AV1_COMP *const cpi,
                  cm->mi_cols);
 
 #if MY_UPDATE_ALTREF
-  xd->f_buf_ctr = cm->f_buf_ctr;
+  // xd->f_buf_ctr = cm->f_buf_ctr;
+  set_xd_buf_int_ptr(cm, xd);
   set_xd_buf_pointers(xd->f_use_altref, &cm->f_use_altref);
   set_xd_buf_pointers(xd->f_altref_obrv, &cm->altref_obsv);
 #endif
@@ -5000,11 +5018,12 @@ static void encode_frame_internal(AV1_COMP *cpi) {
 
 #if MY_UPDATE_ALTREF
   {
-    int frame_size = cm->f_use_altref.y_height * cm->f_use_altref.y_width;
+    // int frame_size = cm->f_use_altref.y_height * cm->f_use_altref.y_width;
     // reset buffer for recoding
     set_my_buf_zero(&cm->f_use_altref);
     set_my_buf_zero(&cm->altref_obsv);
-    memset(cm->f_buf_ctr, 0, frame_size);
+    // memset(cm->f_buf_ctr, 0, frame_size);
+    set_my_int_buf_zero(cm);
   };
 #endif
 
@@ -5357,6 +5376,67 @@ static void copy_mb2buf(MACROBLOCKD *const xd,
   }
 }
 
+static void copy_recon_mb2buf(const AV1_COMMON *const cm, MACROBLOCKD *const xd,
+                              int mi_row, int mi_col, BLOCK_SIZE bsize) {
+  MB_MODE_INFO *mbmi = xd->mi[0];
+  int altref = mbmi->ref_frame[0] == ALTREF_FRAME ? 0 :
+               mbmi->ref_frame[1] == ALTREF_FRAME ? 1 : -1;
+  // altref is not used as reference, so we skip copying this block
+  if (altref == -1) {
+    return;
+  }
+
+  const int bh = block_size_high[bsize];
+  const int bw = block_size_wide[bsize];
+
+  // How to handel mvs with odd number
+  int mv_r = (mbmi->mv[altref].as_mv.row >> 4) << 1;
+  int mv_c = (mbmi->mv[altref].as_mv.col >> 4) << 1;
+  // find the top-left coordinate of the reference block
+  int tr = mi_row * MI_SIZE + mv_r;
+  int tc = mi_col * MI_SIZE + mv_c;
+
+  // copy y
+  int mb_stride = xd->plane[0].dst.stride;
+  int buf_stride = cm->width;
+  for (int h = 0; h < bh; ++h) {
+    // out of boundary
+    if (h + tr < 0) continue;
+    if (h + tr >= cm->height) break;
+
+    for (int w = 0; w < bw; ++w) {
+      if (w + tc < 0) continue;
+      if (w + tc >= cm->width) break;
+
+      int f_pos = (tr + h) * buf_stride + (tc + w);
+      xd->f_buf[0][f_pos] += xd->plane[0].dst.buf[h * mb_stride + w];
+      xd->f_buf_ctr[f_pos] += 1;
+    }
+  }
+
+  // copy uv
+  for (int p = 1; p < MAX_MB_PLANE; ++p) {
+    int uv_tr = tr >> xd->plane[p].subsampling_y;
+    int uv_tc = tc >> xd->plane[p].subsampling_x;
+    mb_stride = xd->plane[p].dst.stride;
+    buf_stride = cm->width >> xd->plane[p].subsampling_x;
+    for (int h = 0; h < (bh >> xd->plane[p].subsampling_y); ++h) {
+      if (uv_tr + h < 0) continue;
+      if (uv_tr + h >= (cm->height >> xd->plane[p].subsampling_y)) break;
+
+      for (int w = 0; w < (bw >> xd->plane[p].subsampling_x); ++w) {
+        if (uv_tc + w < 0) continue;
+        if (uv_tc + w >= (cm->width >> xd->plane[p].subsampling_x)) break;
+
+        int f_pos = (uv_tr + h) * buf_stride + (uv_tc + w);
+        xd->f_buf[p][f_pos] += xd->plane[p].dst.buf[h * mb_stride + w];
+
+        xd->f_buf_ctr_uv[f_pos] += (p == 1);
+      }
+    }
+  }
+}
+
 static void copy_mb_altref_recon(const AV1_COMMON *const cm, MACROBLOCKD *const xd,
                                  int mi_row, int mi_col, BLOCK_SIZE bsize) {
   MB_MODE_INFO *mbmi = xd->mi[0];
@@ -5517,6 +5597,7 @@ static void encode_superblock(const AV1_COMP *const cpi, TileDataEnc *tile_data,
     if (dry_run == OUTPUT_ENABLED && is_alt) {
       copy_mb2buf(xd, mi_row, mi_col, bsize);
       copy_mb_altref_recon(cm, xd, mi_row, mi_col, bsize);
+      copy_recon_mb2buf(cm, xd, mi_row, mi_col, bsize);
     }
 #endif
     av1_tokenize_sb_vartx(cpi, td, t, dry_run, mi_row, mi_col, bsize, rate,
