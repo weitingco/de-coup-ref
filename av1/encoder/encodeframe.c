@@ -5389,9 +5389,13 @@ static void copy_recon_mb2buf(const AV1_COMMON *const cm, MACROBLOCKD *const xd,
   const int bh = block_size_high[bsize];
   const int bw = block_size_wide[bsize];
 
+  // only do interger mvs
+  if ((mbmi->mv[altref].as_mv.row & 7) || (mbmi->mv[altref].as_mv.col & 7))
+    return;
+
   // How to handel mvs with odd number
-  int mv_r = (mbmi->mv[altref].as_mv.row >> 4) << 1;
-  int mv_c = (mbmi->mv[altref].as_mv.col >> 4) << 1;
+  int mv_r = ROUND_POWER_OF_TWO(mbmi->mv[altref].as_mv.row, 3);
+  int mv_c = ROUND_POWER_OF_TWO(mbmi->mv[altref].as_mv.col, 3);
   // find the top-left coordinate of the reference block
   int tr = mi_row * MI_SIZE + mv_r;
   int tc = mi_col * MI_SIZE + mv_c;
@@ -5416,8 +5420,8 @@ static void copy_recon_mb2buf(const AV1_COMMON *const cm, MACROBLOCKD *const xd,
 
   // copy uv
   for (int p = 1; p < MAX_MB_PLANE; ++p) {
-    int uv_tr = tr >> xd->plane[p].subsampling_y;
-    int uv_tc = tc >> xd->plane[p].subsampling_x;
+    int uv_tr = ROUND_POWER_OF_TWO(tr, xd->plane[p].subsampling_y);
+    int uv_tc = ROUND_POWER_OF_TWO(tc, xd->plane[p].subsampling_x);
     mb_stride = xd->plane[p].dst.stride;
     buf_stride = cm->width >> xd->plane[p].subsampling_x;
     for (int h = 0; h < (bh >> xd->plane[p].subsampling_y); ++h) {
@@ -5451,8 +5455,8 @@ static void copy_mb_altref_recon(const AV1_COMMON *const cm, MACROBLOCKD *const 
   const int bw = block_size_wide[bsize];
 
   // How to handel mvs with odd number
-  int mv_r = (mbmi->mv[altref].as_mv.row >> 4) << 1;
-  int mv_c = (mbmi->mv[altref].as_mv.col >> 4) << 1;
+  int mv_r = ROUND_POWER_OF_TWO(mbmi->mv[altref].as_mv.row, 3);
+  int mv_c = ROUND_POWER_OF_TWO(mbmi->mv[altref].as_mv.col, 3);
   // find the top-left coordinate of the reference block
   int tr = mi_row * MI_SIZE + mv_r;
   int tc = mi_col * MI_SIZE + mv_c;
@@ -5476,8 +5480,8 @@ static void copy_mb_altref_recon(const AV1_COMMON *const cm, MACROBLOCKD *const 
 
   // copy uv
   for (int p = 1; p < MAX_MB_PLANE; ++p) {
-    int uv_tr = tr >> xd->plane[p].subsampling_y;
-    int uv_tc = tc >> xd->plane[p].subsampling_x;
+    int uv_tr = ROUND_POWER_OF_TWO(tr, xd->plane[p].subsampling_y);
+    int uv_tc = ROUND_POWER_OF_TWO(tc, xd->plane[p].subsampling_x);
     mb_stride = xd->plane[p].dst.stride;
 
     for (int h = 0; h < (bh >> xd->plane[p].subsampling_y); ++h) {

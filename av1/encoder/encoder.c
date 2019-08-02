@@ -144,8 +144,9 @@ void recon_temp_filtering(AV1_COMMON *const cm,
   // copy y
   for (int r = 0; r < h; ++r) {
     for (int c = 0; c < w; ++c) {
-      int tmp = src->y_buffer[r * s_stride + c] + cm->f_buf[0][r * stride + c];
-      tmp = DIVIDE_AND_ROUND(tmp, (cm->f_buf_ctr[r * stride + c] + 1));
+      int count = cm->f_buf_ctr[r * stride + c] + 1;
+      int tmp = src->y_buffer[r * s_stride + c] * count + cm->f_buf[0][r * stride + c];
+      tmp = DIVIDE_AND_ROUND(tmp, (2 * count - 1));
       dst->y_buffer[r * d_stride + c] = tmp;
     }
   }
@@ -158,8 +159,9 @@ void recon_temp_filtering(AV1_COMMON *const cm,
   // copy u
   for (int r = 0; r < (h >> subsampling); ++r) {
     for (int c = 0; c < (w >> subsampling); ++c) {
-      int tmp = src->u_buffer[r * s_stride + c] + cm->f_buf[1][r * stride + c];
-      tmp = DIVIDE_AND_ROUND(tmp, (cm->f_buf_ctr_uv[r * stride + c] + 1));
+      int count = cm->f_buf_ctr_uv[r * stride + c] + 1;
+      int tmp = src->u_buffer[r * s_stride + c] * count + cm->f_buf[1][r * stride + c];
+      tmp = DIVIDE_AND_ROUND(tmp, (2 * count - 1));
       dst->u_buffer[r * d_stride + c] = tmp;
     }
   }
@@ -167,8 +169,9 @@ void recon_temp_filtering(AV1_COMMON *const cm,
   // copy u
   for (int r = 0; r < (h >> subsampling); ++r) {
     for (int c = 0; c < (w >> subsampling); ++c) {
-      int tmp = src->v_buffer[r * s_stride + c] + cm->f_buf[2][r * stride + c];
-      tmp = DIVIDE_AND_ROUND(tmp, (cm->f_buf_ctr_uv[r * stride + c] + 1));
+      int count = cm->f_buf_ctr_uv[r * stride + c] + 1;
+      int tmp = src->v_buffer[r * s_stride + c] * count + cm->f_buf[2][r * stride + c];
+      tmp = DIVIDE_AND_ROUND(tmp, 2* count - 1);
       dst->v_buffer[r * d_stride + c] = tmp;
     }
   }
@@ -5576,6 +5579,8 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
     // visualize temporal filtering
     recon_temp_filtering(cm, &altref_rec_buf->buf, &cm->altref_obsv);
 
+    // replace the altref with the filtered one
+    copy_yu12_buf(&cm->altref_obsv, &altref_rec_buf->buf);
     aom_write_one_yuv_frame(cm, &cm->altref_obsv, fid);
     fclose(fid);
   }
