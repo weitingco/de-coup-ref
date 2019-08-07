@@ -569,6 +569,9 @@ typedef struct AV1Common {
   int *f_buf_ctr;
   int *f_buf_ctr_uv;
   unsigned int altref_idx;
+
+  int gop_head;
+  int gop_tail;
 #endif
 } AV1_COMMON;
 

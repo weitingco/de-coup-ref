@@ -5390,8 +5390,8 @@ static void copy_recon_mb2buf(const AV1_COMMON *const cm, MACROBLOCKD *const xd,
   const int bw = block_size_wide[bsize];
 
   // only do interger mvs
-  if ((mbmi->mv[altref].as_mv.row & 7) || (mbmi->mv[altref].as_mv.col & 7))
-    return;
+  // if ((mbmi->mv[altref].as_mv.row & 7) || (mbmi->mv[altref].as_mv.col & 7))
+  //   return;
 
   // How to handel mvs with odd number
   int mv_r = ROUND_POWER_OF_TWO(mbmi->mv[altref].as_mv.row, 3);

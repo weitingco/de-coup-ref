@@ -130,7 +130,7 @@ void copy_yu12_buf(YV12_BUFFER_CONFIG *src, YV12_BUFFER_CONFIG *dst) {
     }
   }
 }
-
+#define FILTER_THR 10
 void recon_temp_filtering(AV1_COMMON *const cm,
                           YV12_BUFFER_CONFIG *src, // ALTREF
                           YV12_BUFFER_CONFIG *dst) {
@@ -145,6 +145,13 @@ void recon_temp_filtering(AV1_COMMON *const cm,
   for (int r = 0; r < h; ++r) {
     for (int c = 0; c < w; ++c) {
       int count = cm->f_buf_ctr[r * stride + c] + 1;
+      int diff = src->y_buffer[r * s_stride + c] -
+                 DIVIDE_AND_ROUND(cm->f_buf[0][r * stride + c], (count - 1));
+      if (count == 1 || abs(diff) > FILTER_THR) {
+        dst->y_buffer[r * d_stride + c] = src->y_buffer[r * s_stride + c];
+        continue;
+      }
+
       int tmp = src->y_buffer[r * s_stride + c] * count + cm->f_buf[0][r * stride + c];
       tmp = DIVIDE_AND_ROUND(tmp, (2 * count - 1));
       dst->y_buffer[r * d_stride + c] = tmp;
@@ -160,6 +167,14 @@ void recon_temp_filtering(AV1_COMMON *const cm,
   for (int r = 0; r < (h >> subsampling); ++r) {
     for (int c = 0; c < (w >> subsampling); ++c) {
       int count = cm->f_buf_ctr_uv[r * stride + c] + 1;
+
+      int diff = src->u_buffer[r * s_stride + c] -
+                 DIVIDE_AND_ROUND(cm->f_buf[1][r * stride + c], (count - 1));
+      if (count == 1 || abs(diff) > FILTER_THR) {
+        dst->u_buffer[r * d_stride + c] = src->u_buffer[r * s_stride + c];
+        continue;
+      }
+
       int tmp = src->u_buffer[r * s_stride + c] * count + cm->f_buf[1][r * stride + c];
       tmp = DIVIDE_AND_ROUND(tmp, (2 * count - 1));
       dst->u_buffer[r * d_stride + c] = tmp;
@@ -170,6 +185,14 @@ void recon_temp_filtering(AV1_COMMON *const cm,
   for (int r = 0; r < (h >> subsampling); ++r) {
     for (int c = 0; c < (w >> subsampling); ++c) {
       int count = cm->f_buf_ctr_uv[r * stride + c] + 1;
+
+      int diff = src->v_buffer[r * s_stride + c] -
+                 DIVIDE_AND_ROUND(cm->f_buf[2][r * stride + c], (count - 1));
+      if (count == 1 || abs(diff) > FILTER_THR) {
+        dst->v_buffer[r * d_stride + c] = src->v_buffer[r * s_stride + c];
+        continue;
+      }
+
       int tmp = src->v_buffer[r * s_stride + c] * count + cm->f_buf[2][r * stride + c];
       tmp = DIVIDE_AND_ROUND(tmp, 2* count - 1);
       dst->v_buffer[r * d_stride + c] = tmp;
@@ -5607,6 +5630,15 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size,
     FILE *fid = fopen("restored_altref.yuv", "ab");
     aom_write_one_yuv_frame(cm, altref_buf, fid);
     fclose(fid);
+
+    cm->gop_head = cm->altref_idx;
+  }
+
+  // restore the reference frame after passing the mid point
+  unsigned int mid_point = (cm->gop_tail + cm->altref_idx - 1) >> 1;
+  if (cm->current_frame.order_hint == mid_point) {
+    YV12_BUFFER_CONFIG *altref_buf = &altref_rec_buf->buf;
+    copy_yu12_buf(&cm->altref_backup, altref_buf);
   }
 #endif
 
